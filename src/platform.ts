@@ -72,6 +72,8 @@ export class PetwalkHomebridgePlatform implements DynamicPlatformPlugin {
           throw new Error('Petdoor with IP Address: ' + device.ipAddress + ' not found');
         }
 
+        device.networkDetails = networkDetails;
+
         // generate a unique id for the accessory this should be generated from
         // something globally unique, but constant, for example, the device serial
         // number or MAC address

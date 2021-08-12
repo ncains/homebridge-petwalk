@@ -18,7 +18,7 @@
           "title": "IP Address",
           "type": "string"
         },
-        "name": {
+        "displayName": {
           "title": "Door Name",
           "type": "string"
         }

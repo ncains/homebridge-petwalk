@@ -67,8 +67,8 @@ export class PetwalkPlatformAccessory {
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'petWalk')
-      .setCharacteristic(this.platform.Characteristic.Model, 'petWalk')
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
+      .setCharacteristic(this.platform.Characteristic.Model, 'petWalk v1')
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.accessory.context.device.networkDetails.mac);
 
     // set PetWalk API address
     this.baseAPIUrl = 'http://' + this.accessory.context.device.ipAddress + ':8080/';
