@@ -1,10 +1,13 @@
 {
   "private": false,
   "displayName": "Petwalk.at Homebridge Module",
-  "name": "homebridge-petwalk",
+  "name": "@ncains/homebridge-petwalk",
   "version": "0.0.3-beta.0",
   "description": "A plugin to use the BETA petwalk local api",
   "license": "Apache-2.0",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "repository": {
     "type": "git",
     "url": "git://github.com/ncains/homebridge-petwalk.git"
