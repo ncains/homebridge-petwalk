@@ -1,5 +1,5 @@
 {
-  "private": true,
+  "private": false,
   "displayName": "Petwalk.at Homebridge Module",
   "name": "homebridge-petwalk",
   "version": "0.0.2-beta.0",
