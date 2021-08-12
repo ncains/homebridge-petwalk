@@ -1,54 +1,121 @@
 import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { PetwalkHomebridgePlatform } from './platform';
+import {default as axiosRequire, AxiosRequestConfig, AxiosResponse} from 'axios';
+import http from 'http';
+import https from 'https';
+import { setIntervalAsync } from 'set-interval-async/fixed';
 
-import { ExampleHomebridgePlatform } from './platform';
+
+const axios = axiosRequire.create({
+  //60 sec timeout
+  timeout: 3000,
+  //keepAlive pools and reuses TCP connections, so it's faster
+  httpAgent: new http.Agent({ keepAlive: true }),
+  httpsAgent: new https.Agent({ keepAlive: true }),
+  //follow up to 10 HTTP 3xx redirects
+  maxRedirects: 10,
+  //cap the maximum content length we'll accept to 50MBs, just in case
+  maxContentLength: 50 * 1000 * 1000,
+});
 
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
-export class ExamplePlatformAccessory {
+export class PetwalkPlatformAccessory {
   private service: Service;
+  private inboundEntry: Service;
+  private outboundEntry: Service;
+  private rfid: Service;
 
-  /**
-   * These are just used to create a working example
-   * You should implement your own code to track the state of your accessory
-   */
-  private exampleStates = {
-    On: false,
-    Brightness: 100,
+
+  private currentDoorState = {
+    'door': 'open',
+    'system': 'on',
+    'lastCallOk': true,
   };
 
-  constructor(
-    private readonly platform: ExampleHomebridgePlatform,
+   private targetDoorState = {
+     'door': 'open',
+     'system': 'on',
+     'lastCallOk': true,
+   };
+
+
+   private config = {
+     'brightnessSensor': false,
+     'motion_in': false,
+     'motion_out': true,
+     'rfid': false,
+     'time': false,
+   };
+
+   private baseAPIUrl = '';
+
+   private doorStatusRequest: AxiosRequestConfig = {};
+   private doorStatusChangeRequest: AxiosRequestConfig = {};
+   private configRequest: AxiosRequestConfig = {};
+   private configChangeRequest: AxiosRequestConfig = {};
+
+
+   constructor(
+    private readonly platform: PetwalkHomebridgePlatform,
     private readonly accessory: PlatformAccessory,
-  ) {
+   ) {
 
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Default-Manufacturer')
-      .setCharacteristic(this.platform.Characteristic.Model, 'Default-Model')
+      .setCharacteristic(this.platform.Characteristic.Manufacturer, 'petWalk')
+      .setCharacteristic(this.platform.Characteristic.Model, 'petWalk')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, 'Default-Serial');
 
-    // get the LightBulb service if it exists, otherwise create a new LightBulb service
-    // you can create multiple services for each accessory
-    this.service = this.accessory.getService(this.platform.Service.Lightbulb) || this.accessory.addService(this.platform.Service.Lightbulb);
+    // set PetWalk API address
+    this.baseAPIUrl = 'http://' + this.accessory.context.device.ipAddress + ':8080/';
 
-    // set the service name, this is what is displayed as the default name on the Home app
-    // in this example we are using the name we stored in the `accessory.context` in the `discoverDevices` method.
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.exampleDisplayName);
+    const getDoorStatusUrl: AxiosRequestConfig = {
+      method: 'get',
+      url: this.baseAPIUrl + 'states',
+      headers: { },
+    };
 
-    // each service must implement at-minimum the "required characteristics" for the given service type
-    // see https://developers.homebridge.io/#/service/Lightbulb
+    const putDoorStatusUrl: AxiosRequestConfig = {
+      method: 'put',
+      url: this.baseAPIUrl + 'states',
+      headers: { 'Content-Type': 'application/json'},
+    };
 
-    // register handlers for the On/Off Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this))                // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this));               // GET - bind to the `getOn` method below
+    const getConfigUrl: AxiosRequestConfig = {
+      method: 'get',
+      url: this.baseAPIUrl + 'modes',
+      headers: { },
+    };
 
-    // register handlers for the Brightness Characteristic
-    this.service.getCharacteristic(this.platform.Characteristic.Brightness)
-      .onSet(this.setBrightness.bind(this));       // SET - bind to the 'setBrightness` method below
+    const putConfigUrl: AxiosRequestConfig = {
+      method: 'put',
+      url: this.baseAPIUrl + 'modes',
+      headers: { 'Content-Type': 'application/json'},
+    };
+
+    this.doorStatusRequest = getDoorStatusUrl;
+    this.doorStatusChangeRequest = putDoorStatusUrl;
+    this.configRequest = getConfigUrl;
+    this.configChangeRequest = putConfigUrl;
+
+    this.service = this.accessory.getService(this.platform.Service.GarageDoorOpener)
+      || this.accessory.addService(this.platform.Service.GarageDoorOpener);
+
+    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.displayName);
+
+    this.service.getCharacteristic(this.platform.Characteristic.CurrentDoorState)
+      .onGet(this.handleCurrentDoorStateGet.bind(this));
+
+    this.service.getCharacteristic(this.platform.Characteristic.TargetDoorState)
+      .onGet(this.handleTargetDoorStateGet.bind(this))
+      .onSet(this.handleTargetDoorStateSet.bind(this));
+
+    this.service.getCharacteristic(this.platform.Characteristic.ObstructionDetected)
+      .onGet(this.handleObstructionDetectedGet.bind(this));
 
     /**
      * Creating multiple services of the same type.
@@ -61,13 +128,29 @@ export class ExamplePlatformAccessory {
      * can use the same sub type id.)
      */
 
-    // Example: add two "motion sensor" services to the accessory
-    const motionSensorOneService = this.accessory.getService('Motion Sensor One Name') ||
-      this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor One Name', 'YourUniqueIdentifier-1');
+    this.inboundEntry = this.accessory.getService('Inbound Entry') ||
+    this.accessory.addService(this.platform.Service.Switch, 'Inbound Entry', this.accessory.UUID+'-MIESW');
 
-    const motionSensorTwoService = this.accessory.getService('Motion Sensor Two Name') ||
-      this.accessory.addService(this.platform.Service.MotionSensor, 'Motion Sensor Two Name', 'YourUniqueIdentifier-2');
+    // create handlers for required characteristics
+    this.inboundEntry.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleConfigAttributeGet.bind(this, 'motion_in'))
+      .onSet(this.handleConfigAttributeSet.bind(this, 'motion_in'));
 
+    this.outboundEntry = this.accessory.getService('Outbound Entry') ||
+      this.accessory.addService(this.platform.Service.Switch, 'Outbound Entry', this.accessory.UUID+'-MOESW');
+
+    // create handlers for required characteristics
+    this.outboundEntry.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleConfigAttributeGet.bind(this, 'motion_out'))
+      .onSet(this.handleConfigAttributeSet.bind(this, 'motion_out'));
+
+    this.rfid = this.accessory.getService('RFID Detection') ||
+      this.accessory.addService(this.platform.Service.Switch, 'RFID Detection', this.accessory.UUID+'-RFIDSW');
+
+    // create handlers for required characteristics
+    this.rfid.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(this.handleConfigAttributeGet.bind(this, 'rfid'))
+      .onSet(this.handleConfigAttributeSet.bind(this, 'rfid'));
     /**
      * Updating characteristics values asynchronously.
      *
@@ -77,65 +160,211 @@ export class ExamplePlatformAccessory {
      * the `updateCharacteristic` method.
      *
      */
-    let motionDetected = false;
-    setInterval(() => {
-      // EXAMPLE - inverse the trigger
-      motionDetected = !motionDetected;
+    setIntervalAsync(async() => {
 
-      // push the new value to HomeKit
-      motionSensorOneService.updateCharacteristic(this.platform.Characteristic.MotionDetected, motionDetected);
-      motionSensorTwoService.updateCharacteristic(this.platform.Characteristic.MotionDetected, !motionDetected);
+      await Promise.all([this.refreshPetwalkDoorStatus(), this.refreshConfigStatus()]);
 
-      this.platform.log.debug('Triggering motionSensorOneService:', motionDetected);
-      this.platform.log.debug('Triggering motionSensorTwoService:', !motionDetected);
-    }, 10000);
-  }
+      const currentDoorState: CharacteristicValue = this.readDoorState(true);
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
+      this.service.updateCharacteristic(this.platform.Characteristic.CurrentDoorState, currentDoorState);
+      this.inboundEntry.updateCharacteristic(this.platform.Characteristic.On, this.readConfigState('motion_in'));
+      this.outboundEntry.updateCharacteristic(this.platform.Characteristic.On, this.readConfigState('motion_out'));
+      this.rfid.updateCharacteristic(this.platform.Characteristic.On, this.readConfigState('rfid'));
+
+    }, 500);
+
+
+   }
+
+   async refreshConfigStatus() {
+     try {
+
+       const response: AxiosResponse = await axios(this.configRequest);
+
+       if(response.status === 200) {
+         for(let i = 0; i < Object.keys(response.data).length; i++) {
+           const keyVal = Object.keys(response.data)[i];
+           if(response.data[keyVal] !== this.config[keyVal]) {
+             this.platform.log.info( keyVal + ' config changed from ' + this.config[keyVal] + ' to ' + response.data[keyVal]);
+           }
+         }
+         this.config = response.data;
+       } else {
+         throw new Error(JSON.stringify({status: response.status, data: response.data}));
+       }
+     } catch (error) {
+       this.currentDoorState.lastCallOk = false;
+       this.platform.log.warn(error);
+     }
+   }
+
+
+   async refreshPetwalkDoorStatus() {
+     try {
+
+       const response: AxiosResponse = await axios(this.doorStatusRequest);
+
+       if(response.status === 200 && response.data.door && response.data.system) {
+         if(response.data.door !== this.currentDoorState.door) {
+           this.platform.log.info('Door status changed from ' + this.currentDoorState.door + ' to ' + response.data.door);
+         }
+         if(response.data.system !== this.currentDoorState.system) {
+           this.platform.log.info('System status changed from ' + this.currentDoorState.system + ' to ' + response.data.system);
+         }
+         this.currentDoorState = {'door' : response.data.door, 'system': response.data.system, 'lastCallOk': true};
+       } else {
+         throw new Error(JSON.stringify({status: response.status, data: response.data}));
+       }
+     } catch (error) {
+       this.currentDoorState.lastCallOk = false;
+       this.platform.log.warn(error);
+     }
+   }
+
+   async updatePetwalkDoorStatus() {
+     try {
+       if(this.targetDoorState.door !== this.currentDoorState.door ) {
+         this.platform.log.info('updating door status from: ' + this.currentDoorState.door + ' to ' + this.targetDoorState.door);
+
+         const request = this.doorStatusChangeRequest;
+
+         const data = this.targetDoorState;
+         data.door = data.door === 'closed' ? 'close' : 'open';
+         request.data = JSON.stringify(data);
+
+         const response: AxiosResponse = await axios(request);
+
+         if(response.status === 202 ) {
+           this.platform.log.info('Requested door status change to ' + this.targetDoorState.door);
+           await this.refreshPetwalkDoorStatus();
+         } else {
+           throw new Error(response.status.toString());
+         }
+       }
+     } catch (error) {
+       this.targetDoorState.lastCallOk = false;
+       this.platform.log.warn(error);
+     }
+   }
+
+   async updateConfig() {
+     try {
+
+       const request = this.configChangeRequest;
+
+       const data = this.config;
+
+       request.data = JSON.stringify(data);
+
+       const response: AxiosResponse = await axios(request);
+
+       if(response.status === 202 ) {
+         this.platform.log.info('Requested config change complete');
+         await this.refreshConfigStatus();
+       } else {
+         throw new Error(response.status.toString());
+       }
+
+     } catch (error) {
+       this.targetDoorState.lastCallOk = false;
+       this.platform.log.warn(error);
+     }
+   }
+
+   readConfigState(AttributeName) {
+     return this.config[AttributeName];
+   }
+
+   readDoorState(current: boolean) {
+
+     const state = current ? this.currentDoorState : this.targetDoorState;
+
+
+     return state.door === 'open' //this needs much better logic - but good for initial test
+       ? this.platform.Characteristic.CurrentDoorState.OPEN
+       : this.platform.Characteristic.CurrentDoorState.CLOSED;
+   }
+
+
+   /**
+   * Handle requests to get the current value of a specified config characteristic
    */
-  async setOn(value: CharacteristicValue) {
-    // implement your own code to turn your device on/off
-    this.exampleStates.On = value as boolean;
+   async handleConfigAttributeGet(AttributeName) {
+     this.platform.log.debug('Triggered GET ConfigAttribute ' + AttributeName);
 
-    this.platform.log.debug('Set Characteristic On ->', value);
-  }
+     // set this to a valid value for CurrentDoorState
+     const currentValue = this.config[AttributeName];
 
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possbile. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
+     return currentValue;
+   }
 
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
+   /**
+   * Handle requests to set the current value of a specified config characteristic
    */
-  async getOn(): Promise<CharacteristicValue> {
-    // implement your own code to check if the device is on
-    const isOn = this.exampleStates.On;
+   async handleConfigAttributeSet(AttributeName, value) {
+     this.platform.log.debug('Triggered SET ConfigAttribute ' + AttributeName + ', Value: ' + value);
 
-    this.platform.log.debug('Get Characteristic On ->', isOn);
+     this.config[AttributeName] = value;
+     await this.updateConfig();
+   }
 
-    // if you need to return an error to show the device as "Not Responding" in the Home app:
-    // throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
-    return isOn;
-  }
-
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, changing the Brightness
+   /**
+   * Handle requests to get the current value of the "Current Door State" characteristic
    */
-  async setBrightness(value: CharacteristicValue) {
-    // implement your own code to set the brightness
-    this.exampleStates.Brightness = value as number;
+   async handleCurrentDoorStateGet() {
+     this.platform.log.debug('Triggered GET CurrentDoorState');
 
-    this.platform.log.debug('Set Characteristic Brightness -> ', value);
-  }
+     // set this to a valid value for CurrentDoorState
+     const currentValue = this.readDoorState(true);
+
+
+     return currentValue;
+   }
+
+
+   /**
+     * Handle requests to get the current value of the "Target Door State" characteristic
+     */
+   async handleTargetDoorStateGet() {
+     this.platform.log.debug('Triggered GET TargetDoorState');
+
+     // set this to a valid value for TargetDoorState
+     const currentValue = this.readDoorState(false);
+
+     return currentValue;
+   }
+
+   /**
+     * Handle requests to set the "Target Door State" characteristic
+     */
+   async handleTargetDoorStateSet(value) {
+
+
+
+     this.platform.log.info('handleTargetDoorStateSet', value);
+     if (this.platform.Characteristic.TargetDoorState.OPEN === value) {
+       this.platform.log.debug('Triggered SET TargetDoorState: OPEN');
+       this.targetDoorState.door = 'open';
+     } else if (this.platform.Characteristic.TargetDoorState.CLOSED === value) {
+       this.platform.log.debug('Triggered SET TargetDoorState: CLOSED');
+       this.targetDoorState.door = 'closed';
+     } else {
+       this.platform.log.debug('Triggered SET TargetDoorState: UNKNOWN');
+     }
+     await this.updatePetwalkDoorStatus();
+   }
+
+   /**
+     * Handle requests to get the current value of the "Obstruction Detected" characteristic
+     */
+   async handleObstructionDetectedGet() {
+     this.platform.log.debug('Triggered GET ObstructionDetected');
+
+     // set this to a valid value for ObstructionDetected
+     const currentValue = false;
+
+     return currentValue;
+   }
 
 }

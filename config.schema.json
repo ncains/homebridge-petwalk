@@ -1,15 +1,27 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "PetwalkHomebridgePlugin",
   "pluginType": "platform",
   "singular": true,
   "schema": {
     "type": "object",
     "properties": {
-      "name": {
-        "title": "Name",
-        "type": "string",
-        "required": true,
-        "default": "Example Dynamic Platform"
+      "statusUpdateFrequency": {
+        "title": "Update Frequency in MS",
+        "type": "integer",
+        "required": false,
+        "default": 500
+      },
+      "doors": {
+        "title": "Registered Pet Doors",
+        "type": "array",
+        "ipAddress": {
+          "title": "IP Address",
+          "type": "string"
+        },
+        "name": {
+          "title": "Door Name",
+          "type": "string"
+        }
       }
     }
   }
