@@ -3,8 +3,6 @@
   "pluginType": "platform",
   "singular": true,
   "schema": {
-    "type": "object",
-    "properties": {
       "statusUpdateFrequency": {
         "title": "Update Frequency in MS",
         "type": "integer",
@@ -14,15 +12,23 @@
       "doors": {
         "title": "Registered Pet Doors",
         "type": "array",
+        "required": true,
+        "items": {
+        "type": "object",
+        "properties" : {
         "ipAddress": {
           "title": "IP Address",
-          "type": "string"
+          "type": "string",
+           "required": true,
+        "format": "ipv4"
         },
         "displayName": {
           "title": "Door Name",
-          "type": "string"
+          "type": "string",
+          "required": true
         }
+        }  
       }
     }
   }
-}
+} 
