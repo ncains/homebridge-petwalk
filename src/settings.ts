@@ -6,4 +6,4 @@ export const PLATFORM_NAME = 'PetwalkPlugin';
 /**
  * This must match the name of your plugin as defined the package.json
  */
-export const PLUGIN_NAME = 'homebridge-petwalk';
+export const PLUGIN_NAME = '@ncains/homebridge-petwalk';

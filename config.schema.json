@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "PetwalkHomebridgePlugin",
+  "pluginAlias": "PetwalkPlugin",
   "pluginType": "platform",
   "singular": true,
   "schema": {
