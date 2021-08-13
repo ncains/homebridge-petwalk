@@ -2,7 +2,7 @@
   "private": false,
   "displayName": "Petwalk.at Homebridge Module",
   "name": "@ncains/homebridge-petwalk",
-  "version": "0.0.3-beta.0",
+  "version": "0.0.4-beta.0",
   "description": "A plugin to use the BETA petwalk local api",
   "license": "Apache-2.0",
   "publishConfig": {
