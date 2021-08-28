@@ -26,6 +26,12 @@
           "title": "Door Name",
           "type": "string",
           "required": true
+        },
+        "doorOpenDelayTimer": {
+          "title": "Door Open/Shut Delay",
+          "type": "integer",
+          "required": true,
+          "default": 90000
         }
         }  
       }

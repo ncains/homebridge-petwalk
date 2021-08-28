@@ -58,6 +58,8 @@ export class PetwalkPlatformAccessory {
    private configRequest: AxiosRequestConfig = {};
    private configChangeRequest: AxiosRequestConfig = {};
 
+   private doorOpenShutDelay = 120000;
+
 
    constructor(
     private readonly platform: PetwalkHomebridgePlatform,
@@ -72,6 +74,9 @@ export class PetwalkPlatformAccessory {
 
     // set PetWalk API address
     this.baseAPIUrl = 'http://' + this.accessory.context.device.ipAddress + ':8080/';
+
+    // set OpenShut Delay
+    this.doorOpenShutDelay = this.accessory.context.device.doorOpenDelayTimer;
 
     const getDoorStatusUrl: AxiosRequestConfig = {
       method: 'get',
@@ -346,6 +351,9 @@ export class PetwalkPlatformAccessory {
      if (this.platform.Characteristic.TargetDoorState.OPEN === value) {
        this.platform.log.debug('Triggered SET TargetDoorState: OPEN');
        this.targetDoorState.door = 'open';
+       setTimeout(async () => {
+         await this.handleTargetDoorStateSet(this.platform.Characteristic.TargetDoorState.CLOSED);
+       }, this.doorOpenShutDelay);
      } else if (this.platform.Characteristic.TargetDoorState.CLOSED === value) {
        this.platform.log.debug('Triggered SET TargetDoorState: CLOSED');
        this.targetDoorState.door = 'closed';
